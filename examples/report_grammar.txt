@@ -1,0 +1,5 @@
+4
+S -> (A)
+A -> BC e
+C -> ,BC e
+B -> i S

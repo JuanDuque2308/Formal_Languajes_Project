@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grammar Visualizer</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1f24; --muted: #6b6f78; --line: #d9d7d0;
+    --accent: #2f5bd3; --ok: #1f8a4c; --cur: #e08a00; --bad: #c62828; --soft: #eef1fb;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+           display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header span { color: var(--muted); font-size: 13px; }
+  .layout { display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 52px); }
+  aside { border-right: 1px solid var(--line); padding: 16px; background: var(--panel); }
+  aside label { display: block; font-size: 12px; font-weight: 600; color: var(--muted);
+                text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 6px; }
+  textarea, input[type=text], select { width: 100%; font: 13px var(--mono); padding: 8px;
+            border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  textarea { height: 170px; resize: vertical; }
+  button { font: inherit; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--line);
+           background: #fff; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); width: 100%;
+                   margin-top: 14px; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  .check { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; }
+  .status { margin-top: 14px; font-size: 13px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px;
+           font-weight: 600; margin: 2px 4px 2px 0; }
+  .yes { background: #e3f4ea; color: var(--ok); } .no { background: #fbe7e7; color: var(--bad); }
+  main { padding: 0 20px 20px; min-width: 0; }
+  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px;
+        position: sticky; top: 0; background: var(--bg); padding-top: 12px; z-index: 2; flex-wrap: wrap; }
+  nav button { border: none; background: none; border-bottom: 2px solid transparent;
+               border-radius: 0; padding: 8px 12px; color: var(--muted); }
+  nav button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab { display: none; } .tab.on { display: block; }
+  table { border-collapse: collapse; font: 12.5px var(--mono); background: var(--panel); }
+  th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; white-space: nowrap; }
+  th { background: #f0efea; }
+  td.conflict { background: #fbe7e7; color: var(--bad); font-weight: 600; }
+  .scroll { overflow: auto; max-width: 100%; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+          margin-bottom: 14px; }
+  .msg { font: 12.5px var(--mono); color: var(--bad); white-space: pre-wrap; }
+  .svgwrap { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+             height: 62vh; overflow: hidden; position: relative; }
+  .svgwrap svg { width: 100%; height: 100%; cursor: grab; display: block; }
+  .controls { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; flex-wrap: wrap; }
+  .controls .info { color: var(--muted); font-size: 13px; }
+  .split { display: grid; grid-template-columns: 1fr 330px; gap: 14px; }
+  .order { font: 12px var(--mono); max-height: 62vh; overflow: auto; padding: 0; margin: 0; list-style: none; }
+  .order li { padding: 3px 6px; border-radius: 4px; color: var(--muted); }
+  .order li.done { color: var(--ink); } .order li.cur { background: #fdf0d9; color: var(--ink); }
+  .legend { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 10px; }
+  .hint { color: var(--muted); font-size: 13px; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; } aside { border-right: none; border-bottom: 1px solid var(--line); }
+    .split { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Grammar Visualizer</h1>
+  <span>FIRST/FOLLOW · LL(1) · SLR(1) · SDD dependency graph (Aho et al., §4.4–4.6, §5.1–5.2)</span>
+</header>
+<div class="layout">
+  <aside>
+    <label for="example">Example</label>
+    <select id="example"></select>
+    <label for="grammar">Grammar (format of §2.2)</label>
+    <textarea id="grammar" spellcheck="false"></textarea>
+    <label for="string">String (for the parse tree / SDD)</label>
+    <input type="text" id="string" spellcheck="false" placeholder="e.g. 8:17">
+    <label for="parser">Parser</label>
+    <select id="parser"><option value="T">LL(1) (top-down)</option><option value="B">SLR(1) (bottom-up)</option></select>
+    <div class="check"><input type="checkbox" id="circular"><span>Use the mutated (circular) SDD</span></div>
+    <button class="primary" id="run">Analyze</button>
+    <div class="status" id="status"></div>
+  </aside>
+  <main>
+    <nav id="tabs">
+      <button data-tab="sets" class="on">FIRST / FOLLOW</button>
+      <button data-tab="ll1">LL(1) table</button>
+      <button data-tab="slr">SLR(1) table</button>
+      <button data-tab="lr0">LR(0) automaton</button>
+      <button data-tab="sdd">Parse tree &amp; dependency graph</button>
+    </nav>
+    <section class="tab on" id="tab-sets"></section>
+    <section class="tab" id="tab-ll1"></section>
+    <section class="tab" id="tab-slr"></section>
+    <section class="tab" id="tab-lr0">
+      <div class="svgwrap"><svg id="lr0svg"></svg></div>
+      <div class="legend">Drag to pan, scroll to zoom. Bold border = state with a complete item.</div>
+    </section>
+    <section class="tab" id="tab-sdd">
+      <div id="sddmsg"></div>
+      <div class="controls">
+        <button id="reset">⟲ Reset</button>
+        <button id="step">Step ▸</button>
+        <button id="play">▶ Play</button>
+        <button id="all">Show all</button>
+        <span class="info" id="stepinfo"></span>
+      </div>
+      <div class="split">
+        <div>
+          <div class="svgwrap"><svg id="treesvg"></svg></div>
+          <div class="legend">
+            <i style="background:#e9ecf5"></i>not yet evaluated
+            <i style="background:var(--cur)"></i>being evaluated
+            <i style="background:var(--ok)"></i>evaluated
+            <i style="background:var(--bad)"></i>cycle ·
+            inherited attributes on the left of a node, synthesized on the right (as in Fig. 5.7).
+          </div>
+        </div>
+        <div class="card"><b>Evaluation order</b><ol class="order" id="order"></ol></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const EXAMPLES = {
+  "Our SDD: number in base b (b:digits)": ["4\nS -> N:N\nN -> DR\nR -> DR e\nD -> 0 1 2 3 4 5 6 7 8 9", "8:17"],
+  "Assignment Ex. 1 / book (4.1)": ["3\nS -> S+T T\nT -> T*F F\nF -> (S) i", ""],
+  "Assignment Ex. 2": ["3\nS -> AB\nA -> aA d\nB -> bBc e", ""],
+  "Assignment Ex. 3": ["1\nS -> SS a", ""],
+  "Book (4.28)": ["5\nS -> TA\nA -> +TA e\nT -> FB\nB -> *FB e\nF -> (S) i", ""],
+  "Report grammar: nested lists": ["4\nS -> (A)\nA -> BC e\nC -> ,BC e\nB -> i S", ""],
+};
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+for (const k of Object.keys(EXAMPLES)) $("example").add(new Option(k, k));
+$("example").onchange = () => { const [g, s] = EXAMPLES[$("example").value]; $("grammar").value = g; $("string").value = s; run(); };
+$("grammar").value = EXAMPLES[$("example").value][0];
+$("string").value = EXAMPLES[$("example").value][1];
+
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === "tab-" + b.dataset.tab));
+});
+
+// ---------------------------------------------------------------- pan & zoom
+function panZoom(svg) {
+  let vb = null, drag = null;
+  svg.setView = (x, y, w, h) => { vb = {x, y, w, h}; apply(); };
+  const apply = () => svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  svg.addEventListener("wheel", e => {
+    if (!vb) return; e.preventDefault();
+    const r = svg.getBoundingClientRect(), f = e.deltaY > 0 ? 1.12 : 1 / 1.12;
+    const px = vb.x + (e.clientX - r.left) / r.width * vb.w, py = vb.y + (e.clientY - r.top) / r.height * vb.h;
+    vb = {x: px - (px - vb.x) * f, y: py - (py - vb.y) * f, w: vb.w * f, h: vb.h * f}; apply();
+  }, {passive: false});
+  svg.addEventListener("pointerdown", e => { drag = {x: e.clientX, y: e.clientY, vb: {...vb}}; svg.setPointerCapture(e.pointerId); });
+  svg.addEventListener("pointermove", e => {
+    if (!drag || !vb) return; const r = svg.getBoundingClientRect();
+    vb.x = drag.vb.x - (e.clientX - drag.x) / r.width * vb.w; vb.y = drag.vb.y - (e.clientY - drag.y) / r.height * vb.h; apply();
+  });
+  svg.addEventListener("pointerup", () => drag = null);
+}
+panZoom($("lr0svg")); panZoom($("treesvg"));
+
+function el(tag, attrs, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function arrowDefs(svg) {
+  const defs = el("defs", {}, svg);
+  for (const [id, color] of [["arr", "#5a6b9a"], ["arrbad", "#c62828"], ["arrgray", "#8a8d94"]]) {
+    const m = el("marker", {id, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse"}, defs);
+    el("path", {d: "M0,0 L10,5 L0,10 z", fill: color}, m);
+  }
+}
+
+// ---------------------------------------------------------------- run
+let DATA = null;
+async function run() {
+  const q = new URLSearchParams({grammar: $("grammar").value, string: $("string").value,
+                                 parser: $("parser").value, circular: $("circular").checked ? "1" : "0"});
+  $("status").textContent = "Analyzing…";
+  try {
+    const r = await fetch("/api/analyze?" + q); DATA = await r.json();
+  } catch (e) { $("status").innerHTML = `<div class="msg">Cannot reach the server: ${esc(e)}</div>`; return; }
+  if (DATA.error) { $("status").innerHTML = `<div class="msg">${esc(DATA.error)}</div>`; return; }
+  const a = DATA.analysis;
+  $("status").innerHTML =
+    `<span class="badge ${a.ll1.is_ll1 ? "yes" : "no"}">LL(1): ${a.ll1.is_ll1 ? "yes" : "no"}</span>` +
+    `<span class="badge ${a.slr.is_slr1 ? "yes" : "no"}">SLR(1): ${a.slr.is_slr1 ? "yes" : "no"}</span>`;
+  renderSets(a); renderLL1(a); renderSLR(a); renderLR0(a); renderSDD(DATA);
+}
+$("run").onclick = run;
+
+// ---------------------------------------------------------------- tables
+function renderSets(a) {
+  let h = `<div class="card scroll"><table><tr><th>Nonterminal</th><th>FIRST</th><th>FOLLOW</th></tr>`;
+  for (const A of a.nonterminals)
+    h += `<tr><td>${A}</td><td>{${esc(a.first[A].join(", "))}}</td><td>{${esc(a.follow[A].join(", "))}}</td></tr>`;
+  h += `</table></div><div class="card"><b>Productions</b><pre style="margin:6px 0 0;font:12.5px var(--mono)">${
+    a.productions.map((p, i) => `(${i + 1}) ${esc(p)}`).join("\n")}</pre></div>`;
+  $("tab-sets").innerHTML = h;
+}
+function renderLL1(a) {
+  let h = `<div class="card scroll"><table><tr><th></th>${a.ll1.columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr>`;
+  for (const A of a.nonterminals) {
+    h += `<tr><th>${A}</th>`;
+    for (const c of a.ll1.columns) {
+      const cell = a.ll1.table[`${A},${c}`] || [];
+      h += `<td class="${cell.length > 1 ? "conflict" : ""}">${cell.map(esc).join("<br>")}</td>`;
+    }
+    h += "</tr>";
+  }
+  h += "</table></div>";
+  if (a.ll1.violations.length) h += `<div class="card"><b>Why it is not LL(1) (§4.4.3)</b><div class="msg">${a.ll1.violations.map(esc).join("\n")}</div></div>`;
+  $("tab-ll1").innerHTML = h;
+}
+function renderSLR(a) {
+  const s = a.slr;
+  let h = `<div class="card scroll"><table><tr><th rowspan=2>state</th><th colspan=${s.columns.length}>ACTION</th><th colspan=${a.nonterminals.length}>GOTO</th></tr><tr>` +
+          s.columns.map(c => `<th>${esc(c)}</th>`).join("") + a.nonterminals.map(c => `<th>${c}</th>`).join("") + "</tr>";
+  for (let i = 0; i < s.states.length; i++) {
+    h += `<tr><th>${i}</th>`;
+    for (const c of s.columns) {
+      const cell = s.action[`${i},${c}`] || [];
+      h += `<td class="${cell.length > 1 ? "conflict" : ""}">${cell.map(esc).join(" | ")}</td>`;
+    }
+    for (const A of a.nonterminals) h += `<td>${s.goto[`${i},${A}`] ?? ""}</td>`;
+    h += "</tr>";
+  }
+  h += "</table></div>";
+  if (s.conflicts.length) h += `<div class="card"><b>Conflicts (§4.5.4)</b><div class="msg">${s.conflicts.map(esc).join("\n")}</div></div>`;
+  $("tab-slr").innerHTML = h;
+}
+
+// ---------------------------------------------------------------- LR(0) automaton
+function renderLR0(a) {
+  const svg = $("lr0svg"); svg.innerHTML = ""; arrowDefs(svg);
+  const S = a.slr.states, T = a.slr.transitions;
+  const depth = Array(S.length).fill(-1); depth[0] = 0;
+  const queue = [0];
+  while (queue.length) { const i = queue.shift(); for (const [f, , t] of T) if (f === i && depth[t] < 0) { depth[t] = depth[i] + 1; queue.push(t); } }
+  const cols = {}; S.forEach((_, i) => (cols[depth[i]] ||= []).push(i));
+  const W = 190, LH = 15, GAPX = 150, GAPY = 26, pos = {};
+  let maxY = 0;
+  for (const [d, ids] of Object.entries(cols)) {
+    let y = 0;
+    for (const i of ids) { const h = 26 + S[i].length * LH; pos[i] = {x: d * (W + GAPX), y, w: W, h}; y += h + GAPY; }
+    maxY = Math.max(maxY, y);
+  }
+  const gEdges = el("g", {}, svg), gNodes = el("g", {}, svg);
+  const pairs = {};
+  for (const [f, X, t] of T) (pairs[f + "," + t] ||= []).push(X);
+  for (const [k, labels] of Object.entries(pairs)) {
+    const [f, t] = k.split(",").map(Number), A = pos[f], B = pos[t];
+    let d, lx, ly;
+    if (f === t) {
+      const x = A.x + A.w, y = A.y + 14;
+      d = `M${x},${y} C${x + 40},${y - 30} ${x + 40},${y + 30} ${x},${y + 12}`; lx = x + 34; ly = y;
+    } else if (B.x > A.x) {
+      const x1 = A.x + A.w, y1 = A.y + Math.min(A.h / 2, 20), x2 = B.x, y2 = B.y + Math.min(B.h / 2, 20);
+      d = `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`; lx = (x1 + x2) / 2; ly = (y1 + y2) / 2 - 4;
+    } else if (B.x === A.x) {
+      const x1 = A.x + A.w, y1 = A.y + A.h / 2, x2 = B.x + B.w, y2 = B.y + Math.min(B.h / 2, 20), bulge = 45 + Math.abs(y2 - y1) * 0.08;
+      d = `M${x1},${y1} C${x1 + bulge},${y1} ${x2 + bulge},${y2} ${x2},${y2}`; lx = x1 + bulge * 0.75; ly = (y1 + y2) / 2;
+    } else {
+      const x1 = A.x + A.w / 2, y1 = A.y, x2 = B.x + B.w / 2, y2 = B.y;
+      const top = Math.min(y1, y2) - 40;
+      d = `M${x1},${y1} C${x1},${top} ${x2},${top} ${x2},${y2}`; lx = (x1 + x2) / 2; ly = top + 8;
+    }
+    el("path", {d, fill: "none", stroke: "#8a8d94", "stroke-width": 1.2, "marker-end": "url(#arrgray)"}, gEdges);
+    el("text", {x: lx, y: ly, "font-size": 12, "font-family": "monospace", "text-anchor": "middle", fill: "#2f5bd3", "font-weight": 700,
+                stroke: "#fff", "stroke-width": 3, "paint-order": "stroke"}, gEdges, labels.join(", "));
+  }
+  S.forEach((items, i) => {
+    const p = pos[i], complete = items.some(it => it.endsWith("."));
+    const g = el("g", {}, gNodes);
+    el("rect", {x: p.x, y: p.y, width: p.w, height: p.h, rx: 6, fill: "#fff", stroke: complete ? "#1d1f24" : "#b9b7b0", "stroke-width": complete ? 2 : 1}, g);
+    el("text", {x: p.x + 8, y: p.y + 16, "font-size": 12, "font-weight": 700}, g, "I" + i);
+    items.forEach((it, k) => el("text", {x: p.x + 8, y: p.y + 32 + k * LH, "font-size": 11.5, "font-family": "monospace"}, g, it));
+  });
+  const maxX = Math.max(...Object.values(pos).map(p => p.x + p.w)) + 60;
+  svg.setView(-30, -60, maxX + 60, maxY + 90);
+}
+
+// ---------------------------------------------------------------- parse tree + dependency graph
+let STEP = 0, TIMER = null, SDDV = null;
+function renderSDD(data) {
+  const svg = $("treesvg"); svg.innerHTML = ""; arrowDefs(svg);
+  $("order").innerHTML = ""; $("sddmsg").innerHTML = ""; stop(); SDDV = null;
+  const d = data.sdd;
+  if (data.sdd_error) { $("sddmsg").innerHTML = `<div class="card msg">${esc(data.sdd_error)}</div>`; return; }
+  if (!d) { $("sddmsg").innerHTML = `<div class="card hint">Type a string and press Analyze to see its parse tree.</div>`; return; }
+  if (d.validation_errors.length) {
+    $("sddmsg").innerHTML = `<div class="card"><b>The SDD does not match this grammar</b><div class="msg">${d.validation_errors.map(esc).join("\n")}</div><div class="hint">The SDD of the project is defined for the grammar "Our SDD" in the examples.</div></div>`;
+    return;
+  }
+  if (!d.accepted) { $("sddmsg").innerHTML = `<div class="card"><span class="badge no">no</span> the string is not in the language.</div>`; return; }
+
+  const cls = d.classification;
+  let head = `<div class="card"><span class="badge yes">yes</span> parsed with ${d.parser === "T" ? "LL(1)" : "SLR(1)"} · ` +
+             `S-attributed: <b>${cls.S ? "yes" : "no"}</b> · L-attributed: <b>${cls.L ? "yes" : "no"}</b>`;
+  if (d.cycle.length) head += `<div class="msg" style="margin-top:6px">${esc(d.error)}</div>`;
+  else head += ` · result: <b>S.val = ${esc(d.result)}</b>`;
+  $("sddmsg").innerHTML = head + "</div>";
+
+  // --- tree layout: leaves get consecutive columns, parents are centered
+  const nodes = {}; d.tree.forEach(n => nodes[n.id] = {...n});
+  const syn = d.attributes.synthesized, inh = d.attributes.inherited;
+  const COL = 215, ROW = 125;
+  let col = 0;
+  (function place(id) {
+    const n = nodes[id];
+    if (!n.children.length) { n.x = col++ * COL; }
+    else { n.children.forEach(place); n.x = (nodes[n.children[0]].x + nodes[n.children.at(-1)].x) / 2; }
+    n.y = n.depth * ROW;
+  })(d.tree[0].id);
+
+  // --- attribute vertices (pills): inherited left of the node, synthesized right
+  const PW = 68, PH = 17, vpos = {};
+  const attrsOf = n => {
+    const isT = !/^[A-Z]/.test(n.symbol);
+    if (n.symbol === "e" && !n.production) return [[], []];
+    if (isT) return [[], ["lexval"]];
+    return [(inh[n.symbol] || []), (syn[n.symbol] || [])];
+  };
+  const present = new Set(d.vertices.map(v => v.join("|")));
+  for (const n of Object.values(nodes)) {
+    const [L, R] = attrsOf(n);
+    L.filter(a => present.has(n.id + "|" + a)).forEach((a, k) => vpos[n.id + "|" + a] = {x: n.x - 18 - PW, y: n.y - 20 + k * (PH + 4), a, n});
+    R.filter(a => present.has(n.id + "|" + a)).forEach((a, k) => vpos[n.id + "|" + a] = {x: n.x + 18, y: n.y - 20 + k * (PH + 4), a, n});
+  }
+
+  const gTree = el("g", {}, svg), gDep = el("g", {}, svg), gN = el("g", {}, svg), gV = el("g", {}, svg);
+  for (const n of Object.values(nodes))
+    for (const c of n.children) el("line", {x1: n.x, y1: n.y + 14, x2: nodes[c].x, y2: nodes[c].y - 14, stroke: "#c9c7c0", "stroke-width": 1.4}, gTree);
+  for (const n of Object.values(nodes)) {
+    const g = el("g", {}, gN);
+    el("circle", {cx: n.x, cy: n.y, r: 14, fill: n.production ? "#1d1f24" : "#fff", stroke: "#1d1f24", "stroke-width": 1.4}, g);
+    el("text", {x: n.x, y: n.y + 4.5, "text-anchor": "middle", "font-size": 13, "font-weight": 700, "font-family": "monospace",
+                fill: n.production ? "#fff" : "#1d1f24"}, g, n.symbol === "e" && !n.production ? "ε" : n.symbol);
+    el("text", {x: n.x, y: n.y + 28, "text-anchor": "middle", "font-size": 9.5, fill: "#8a8d94"}, g, "#" + n.id);
+  }
+  const cycleSet = new Set(d.cycle.map(v => v.join("|")));
+  const cycleEdges = new Set(); for (let i = 0; i + 1 < d.cycle.length; i++) cycleEdges.add(d.cycle[i].join("|") + ">" + d.cycle[i + 1].join("|"));
+  for (const [u, v] of d.edges) {
+    const A = vpos[u.join("|")], B = vpos[v.join("|")]; if (!A || !B) continue;
+    const bad = cycleEdges.has(u.join("|") + ">" + v.join("|"));
+    const x1 = A.x + PW / 2, y1 = A.y + PH / 2, x2 = B.x + PW / 2, y2 = B.y + PH / 2;
+    const mx = (x1 + x2) / 2 + (y2 - y1) * 0.15, my = (y1 + y2) / 2 - (x2 - x1) * 0.15;
+    // stop the arrow at the border of the target pill (ray-rectangle intersection)
+    const dx = x2 - mx, dy = y2 - my;
+    const t = Math.min(dx ? (PW / 2 + 2) / Math.abs(dx) : Infinity, dy ? (PH / 2 + 2) / Math.abs(dy) : Infinity, 1);
+    el("path", {d: `M${x1},${y1} Q${mx},${my} ${x2 - dx * t},${y2 - dy * t}`, fill: "none",
+                stroke: bad ? "#c62828" : "#5a6b9a", "stroke-width": bad ? 2.2 : 1.1, opacity: bad ? 1 : .75,
+                "marker-end": bad ? "url(#arrbad)" : "url(#arr)"}, gDep);
+  }
+  const pills = {};
+  for (const [k, p] of Object.entries(vpos)) {
+    const g = el("g", {}, gV);
+    const r = el("rect", {x: p.x, y: p.y, width: PW, height: PH, rx: 8, fill: "#e9ecf5", stroke: cycleSet.has(k) ? "#c62828" : "#aab3cf",
+                          "stroke-width": cycleSet.has(k) ? 2 : 1}, g);
+    const t = el("text", {x: p.x + PW / 2, y: p.y + 12.5, "text-anchor": "middle", "font-size": 10.5, "font-family": "monospace"}, g, p.a);
+    el("title", {}, g, `${p.n.symbol}#${p.n.id}.${p.a}`);
+    pills[k] = {r, t, a: p.a};
+  }
+  const xs = Object.values(nodes).map(n => n.x), ys = Object.values(nodes).map(n => n.y);
+  svg.setView(Math.min(...xs) - 120, Math.min(...ys) - 60, Math.max(...xs) - Math.min(...xs) + 260, Math.max(...ys) - Math.min(...ys) + 120);
+
+  $("order").innerHTML = d.order.map((s, i) => `<li id="o${i}">${i + 1}. ${esc(s.name)} = ${esc(s.value)}${s.rule ? `<br><span style="opacity:.7">&nbsp;&nbsp;&nbsp;${esc(s.production)}: ${esc(s.rule)}</span>` : ""}</li>`).join("");
+  SDDV = {d, pills, cycleSet};
+  STEP = 0; paint();
+}
+
+function paint() {
+  if (!SDDV) { $("stepinfo").textContent = ""; return; }
+  const {d, pills, cycleSet} = SDDV;
+  for (const [k, p] of Object.entries(pills)) {
+    p.r.setAttribute("fill", cycleSet.has(k) ? "#fbe7e7" : "#e9ecf5"); p.t.setAttribute("fill", "#1d1f24"); p.t.textContent = p.a;
+  }
+  d.order.forEach((s, i) => {
+    const p = pills[s.vertex.join("|")], li = $("o" + i);
+    li.className = i < STEP - 1 ? "done" : i === STEP - 1 ? "cur" : "";
+    if (!p || i >= STEP) return;
+    p.r.setAttribute("fill", i === STEP - 1 ? "#e08a00" : "#1f8a4c"); p.t.setAttribute("fill", "#fff");
+    const v = String(s.value); p.t.textContent = `${p.a}=${v.length > 6 ? v.slice(0, 5) + "…" : v}`;
+  });
+  if (STEP > 0) $("o" + (STEP - 1)).scrollIntoView({block: "nearest"});
+  const n = d.order.length;
+  $("stepinfo").textContent = d.cycle.length ? "Circular SDD: no topological order exists." : `${STEP} / ${n} attributes evaluated`;
+  $("step").disabled = $("play").disabled = $("all").disabled = !n || STEP >= n;
+}
+function stop() { clearInterval(TIMER); TIMER = null; $("play").textContent = "▶ Play"; }
+$("step").onclick = () => { if (SDDV && STEP < SDDV.d.order.length) { STEP++; paint(); } };
+$("reset").onclick = () => { stop(); STEP = 0; paint(); };
+$("all").onclick = () => { stop(); if (SDDV) { STEP = SDDV.d.order.length; paint(); } };
+$("play").onclick = () => {
+  if (TIMER) return stop();
+  $("play").textContent = "❚❚ Pause";
+  TIMER = setInterval(() => { if (!SDDV || STEP >= SDDV.d.order.length) return stop(); STEP++; paint(); }, 450);
+};
+run();
+</script>
+</body>
+</html>
